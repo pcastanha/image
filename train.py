@@ -15,15 +15,8 @@ from torchvision import datasets, models, transforms
 parser = ArgumentParser(description='Process some integers.')
 parser.add_argument('integers', metavar='N', type=int, nargs='+',
                     help='an integer for the accumulator')
-parser.add_argument('--sum', dest='accumulate', action='store_const',
-                    const=sum, default=max,
+parser.add_argument('--sum', dest='accumulate', action='store_const', const=sum, default=max,
                     help='sum the integers (default: find the max)')
-
-args = parser.parse_args()
-print(args.accumulate(args.integers))
-
-
-device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 
 def load_and_process_data():
@@ -89,7 +82,7 @@ class DeepFeedForwardNet(nn.Module):
         return out
 
 
-def instantiate_model():
+def instantiate_model(device='cpu'):
     dff_net = DeepFeedForwardNet()
     model_rn = models.resnet18(pretrained=True)
 
@@ -174,3 +167,18 @@ def save_model(model, optimizer, image_datasets, lr_scheduler, criterion, path, 
         'lr_scheduler': lr_scheduler.state_dict(),
         'criterion': criterion.state_dict()
     }, os.path.join(directory, '{}_{}.tar'.format(epochs, 'checkpoint')))
+
+
+if __name__ == '__main__':
+    print("Hello World")
+
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
+    args = parser.parse_args()
+    print(args.accumulate(args.integers))
+
+    dataloaders, dataset_sizes = load_and_process_data()
+    print(dataloaders['train'])
+
+    nn, loss, opt, lr_scheduler = instantiate_model(device)
+
