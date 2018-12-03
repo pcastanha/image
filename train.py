@@ -98,7 +98,7 @@ def instantiate_model(device='cpu'):
     return model_rn, criterion, optimizer, exp_lr_scheduler
 
 
-def train_model(model, criterion, optimizer, scheduler, dataloaders, dataset_sizes, num_epochs=20):
+def train_model(model, criterion, optimizer, scheduler, dataloaders, dataset_sizes, device='cpu', num_epochs=20):
     best_model_wts = copy.deepcopy(model.state_dict())
     best_acc = 0.0
 
@@ -157,22 +157,23 @@ def save_model(model, optimizer, image_datasets, lr_scheduler, criterion, path, 
     if not os.path.exists(directory):
         os.makedirs(directory)
 
-    model.class_to_index = image_datasets['train'].class_to_idx
+    model.class_to_index = image_datasets['train'].dataset.class_to_idx
 
     torch.save({
         'epochs': epochs,
         'model': model.state_dict(),
         'model_opt': optimizer.state_dict(),
-        'classes': image_datasets['train'].class_to_idx,
+        'classes': image_datasets['train'].dataset.class_to_idx,
         'lr_scheduler': lr_scheduler.state_dict(),
         'criterion': criterion.state_dict()
     }, os.path.join(directory, '{}_{}.tar'.format(epochs, 'checkpoint')))
 
 
 if __name__ == '__main__':
-    print("Hello World")
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
+    print(device)
 
     args = parser.parse_args()
     print(args.accumulate(args.integers))
@@ -181,4 +182,8 @@ if __name__ == '__main__':
     print(dataloaders['train'])
 
     nn, loss, opt, lr_scheduler = instantiate_model(device)
+    m = train_model(nn, loss, opt, lr_scheduler, dataloaders, dataset_sizes, device=device, num_epochs=2)
+
+    path = os.path.join(os.path.dirname(__file__), 'resnet')
+    save_model(m, opt, dataloaders, lr_scheduler, loss, path, 'resnet', 2)
 
