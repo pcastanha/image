@@ -1,5 +1,6 @@
 import json
 import torch
+import logging
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -9,6 +10,12 @@ from PIL import Image
 from torch import nn
 from torchvision import models
 from argparse import ArgumentParser
+
+logging.basicConfig(level=logging.DEBUG,
+                    format='%(asctime)s %(name)-12s %(levelname)-8s %(message)s',
+                    datefmt='%m-%d %H:%M')
+
+logger = logging.getLogger(__file__)
 
 parser = ArgumentParser(description='Process solution arguments.')
 parser.add_argument('--device', type=str, default='cpu', help='Device used for training (cuda or cpu)')
@@ -51,6 +58,7 @@ class DeepFeedForwardNet(nn.Module):
 
 
 def load_model_checkpoint_only(model_dir_, device_='cpu'):
+    logger.info('Loading checkpoint located at: {}'.format(model_dir))
     checkpoint = torch.load(model_dir_)
     model_checkpoint = checkpoint['model']
 
@@ -65,6 +73,8 @@ def load_model_checkpoint_only(model_dir_, device_='cpu'):
 
     net.load_state_dict(model_checkpoint)
     net.class_to_index = checkpoint['classes']
+
+    logger.info('Model loaded')
 
     return net
 
@@ -155,6 +165,8 @@ def predict(image_path, model, topk=5):
     ''' Predict the class (or classes) of an image using a trained deep learning model.
     '''
 
+    logger.info("Starting prediction mode with top-{}".format(topk))
+
     image_as_tensor = torch.Tensor(process_image(Image.open(image_path))).reshape([1, 3, 224, 224])
     reverse = {k: v for v, k in model.class_to_index.items()}
 
@@ -217,15 +229,17 @@ if __name__ == '__main__':
     if args.device == 'cuda':
         if not torch.cuda.is_available():
             device = 'cpu'
-            print('Cuda is not available in this machine, setting device to cpu')
+            logger.warning('Cuda is not available on this machine, setting device to cpu')
         else:
             device = args.device
     else:
         device = args.device
 
+    logger.info('Device mode set to {}'.format(device))
+
     model = load_model_checkpoint_only(model_dir, device)
     predicted = predict(image_path, model, topk=1)
-    print(predicted)
+    logger.info(predicted)
 
     top_k = predict(image_path, model, k)
-    print(top_k)
+    logger.info(top_k)

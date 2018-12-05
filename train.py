@@ -2,6 +2,7 @@ import os
 import copy
 import json
 import torch
+import logging
 
 import torch.nn as nn
 import torch.optim as optim
@@ -11,6 +12,11 @@ from argparse import ArgumentParser
 from torch.optim import lr_scheduler
 from torchvision import datasets, models, transforms
 
+logging.basicConfig(level=logging.DEBUG,
+                    format='%(asctime)s %(name)-12s %(levelname)-8s %(message)s',
+                    datefmt='%m-%d %H:%M')
+
+logger = logging.getLogger(__file__)
 
 parser = ArgumentParser(description='Process solution arguments.')
 parser.add_argument('--device', type=str, default='cpu', help='Device used for training (cuda or cpu)')
@@ -104,6 +110,7 @@ class DeepFeedForwardNet(nn.Module):
 
 
 def instantiate_model(name_, n_layers=1, n_units=128, lr_=0.001, dropout=None, device_='cpu'):
+    logger.info("Instantiating model with params {}".format([name, n_layers, n_units, lr_, dropout]))
     model_rn = models.__dict__[name_](pretrained=True)
 
     if 'vgg' in name:
@@ -130,16 +137,19 @@ def instantiate_model(name_, n_layers=1, n_units=128, lr_=0.001, dropout=None, d
     optimizer = optim.SGD(dff_net.parameters(), lr=lr_, momentum=0.9)
     exp_lr_scheduler = lr_scheduler.StepLR(optimizer, step_size=7, gamma=0.1)
 
+    logger.info("Model, criterion, optimizer and lr-scheduler created.")
+
     return model_rn, criterion, optimizer, exp_lr_scheduler
 
 
 def train_model(model, criterion, optimizer, scheduler, dataloaders, dataset_sizes, device_='cpu', num_epochs=20):
+    logger.info("Training model with epochs:{}".format(num_epochs))
     best_model_wts = copy.deepcopy(model.state_dict())
     best_acc = 0.0
 
     for epoch in range(num_epochs):
-        print('Epoch {}/{}'.format(epoch, num_epochs - 1))
-        print('-' * 10)
+        logger.info('Epoch {}/{}'.format(epoch, num_epochs - 1))
+        logger.info('-' * 10)
 
         for phase in ['train', 'valid']:
             if phase == 'train':
@@ -172,23 +182,23 @@ def train_model(model, criterion, optimizer, scheduler, dataloaders, dataset_siz
             epoch_loss = running_loss / dataset_sizes[phase]
             epoch_acc = running_corrects.double() / dataset_sizes[phase]
 
-            print('{} Loss: {:.4f} Acc: {:.4f}'.format(
+            logger.info('{} Loss: {:.4f} Acc: {:.4f}'.format(
                 phase, epoch_loss, epoch_acc))
 
             if phase == 'valid' and epoch_acc > best_acc:
                 best_acc = epoch_acc
                 best_model_wts = copy.deepcopy(model.state_dict())
 
-        print()
+        # print()
 
-    print('Best val Acc: {:4f}'.format(best_acc))
+    logger.info('Best val Acc: {:4f}'.format(best_acc))
 
     model.load_state_dict(best_model_wts)
     return model
 
 
-def save_model(model, optimizer, image_datasets, lr_scheduler, criterion, path, name, epochs):
-    directory = os.path.join(path, name, '{}-{}'.format('linear', '2'))
+def save_model(model, optimizer, image_datasets, lr_scheduler_, criterion, layers_, name_, epochs_, path_):
+    directory = os.path.join(path_, '{}-dnn{}'.format(name_, layers_))
     if not os.path.exists(directory):
         os.makedirs(directory)
 
@@ -199,9 +209,9 @@ def save_model(model, optimizer, image_datasets, lr_scheduler, criterion, path, 
         'model': model.state_dict(),
         'model_opt': optimizer.state_dict(),
         'classes': image_datasets['train'].dataset.class_to_idx,
-        'lr_scheduler': lr_scheduler.state_dict(),
+        'lr_scheduler': lr_scheduler_.state_dict(),
         'criterion': criterion.state_dict()
-    }, os.path.join(directory, '{}_{}.tar'.format(epochs, 'checkpoint')))
+    }, os.path.join(directory, '{}-dnn{}_{}_{}.tar'.format(name_, layers_, epochs_, 'checkpoint')))
 
 
 if __name__ == '__main__':
@@ -219,14 +229,18 @@ if __name__ == '__main__':
     if args.device == 'cuda':
         if not torch.cuda.is_available():
             device = 'cpu'
-            print('Cuda is not available in this machine, setting device to cpu')
+            logger.warning('Cuda is not available on this machine, setting device to cpu')
         else:
             device = args.device
     else:
         device = args.device
 
-    nn, loss, opt, lr_scheduler = instantiate_model(name, layers, hidden_units, lr, 0.2, 'cpu')
+    logger.info('Device mode set to {}'.format(device))
+
+    nn, loss, opt, lr_scheduler = instantiate_model(name, layers, hidden_units, lr, 0.2, device)
     m = train_model(nn, loss, opt, lr_scheduler, dls, ds_sizes, device_=device, num_epochs=epochs)
 
-    #path = os.path.join(os.path.dirname(__file__), name)
-    #save_model(m, opt, dataloaders, lr_scheduler, loss, path, 'resnet', 2)
+    path = os.path.join(os.path.dirname(__file__), 'checkpoints')
+    save_model(m, opt, dls, lr_scheduler, loss, layers, name, epochs, path)
+
+    logger.info("Model trained and saved")
