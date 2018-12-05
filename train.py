@@ -12,11 +12,14 @@ from torch.optim import lr_scheduler
 from torchvision import datasets, models, transforms
 
 
-parser = ArgumentParser(description='Process some integers.')
-parser.add_argument('integers', metavar='N', type=int, nargs='+',
-                    help='an integer for the accumulator')
-parser.add_argument('--sum', dest='accumulate', action='store_const', const=sum, default=max,
-                    help='sum the integers (default: find the max)')
+parser = ArgumentParser(description='Process solution arguments.')
+parser.add_argument('--device', type=str, default='cpu', help='Device used for training (cuda or cpu)')
+parser.add_argument('--name', type=str, choices=['alexnet', 'vgg11', 'vgg16', 'vgg19', 'resnet18', 'resnet50',
+                                                 'resnet152'], help='One of pre-trained model names', default='vgg11')
+parser.add_argument('--lr', type=int, help='Learning rate', default=1.0e-3)
+parser.add_argument('--layers', type=int, help='Number of hidden layers excluding input and output', default=1)
+parser.add_argument('--units', type=int, help='Number of hidden units per hidden layer', default=128)
+parser.add_argument('--epochs', type=int, help='Number of epochs used for training', default=5)
 
 
 def load_and_process_data():
@@ -67,38 +70,70 @@ def get_cat_to_name():
 
 
 class DeepFeedForwardNet(nn.Module):
-    def __init__(self, dropout=0.2):
+    def __init__(self, input_shape, layers=2, units=128, dropout=0.5):
         super(DeepFeedForwardNet, self).__init__()
-        self.hid1 = nn.Linear(512, 1024)
-        self.hid2 = nn.Linear(1024, 256)
-        self.out = nn.Linear(256, 102)
-        self.dropout = nn.Dropout(dropout)
+        self.input_shape = input_shape
+        self.input = nn.Linear(input_shape, units)
+        self.out = nn.Linear(units, 102)
+        if dropout is not None:
+            self.dropout = nn.Dropout(dropout)
+        else:
+            self.dropout = dropout
+
+        self.layers = list()
+        for i in range(layers):
+            self.layers.append(nn.Linear(units, units))
+
+        self.layers = nn.ModuleList(self.layers)
 
     def forward(self, x):
-        x = F.relu(self.dropout(self.hid1(x)))
-        x = F.relu(self.hid2(x))
-        out = self.out(x)
+        if self.dropout is not None:
+            y = F.relu(self.dropout(self.input(x)))
+
+            for layer in self.layers:
+                y = F.relu(self.dropout(layer(y)))
+        else:
+            y = F.relu(self.input(x))
+
+            for layer in self.layers:
+                y = F.relu(layer(y))
+
+        out = self.out(y)
 
         return out
 
 
-def instantiate_model(device='cpu'):
-    dff_net = DeepFeedForwardNet()
-    model_rn = models.resnet18(pretrained=True)
+def instantiate_model(name_, n_layers=1, n_units=128, lr_=0.001, dropout=None, device_='cpu'):
+    model_rn = models.__dict__[name_](pretrained=True)
+
+    if 'vgg' in name:
+        input_features = 25088  # VGG input
+    elif 'resnet' in name:
+        input_features = 512  # Resnet input
+    else:
+        input_features = 9216  # Alexnet input
+
+    dff_net = DeepFeedForwardNet(input_features, n_layers, n_units, dropout)
+    dff_net = dff_net.to(device_)
 
     for param in model_rn.parameters():
         param.requires_grad = False
 
-    model_rn.fc = dff_net
-    model_rn = model_rn.to(device)
+    # This happens because classifier's last layer doesn't have default names.
+    if 'resnet' in name:
+        model_rn.fc = dff_net
+    else:
+        model_rn.classifier = dff_net
+
+    model_rn = model_rn.to(device_)
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.SGD(model_rn.fc.parameters(), lr=0.001, momentum=0.9)
+    optimizer = optim.SGD(dff_net.parameters(), lr=lr_, momentum=0.9)
     exp_lr_scheduler = lr_scheduler.StepLR(optimizer, step_size=7, gamma=0.1)
 
     return model_rn, criterion, optimizer, exp_lr_scheduler
 
 
-def train_model(model, criterion, optimizer, scheduler, dataloaders, dataset_sizes, device='cpu', num_epochs=20):
+def train_model(model, criterion, optimizer, scheduler, dataloaders, dataset_sizes, device_='cpu', num_epochs=20):
     best_model_wts = copy.deepcopy(model.state_dict())
     best_acc = 0.0
 
@@ -117,8 +152,8 @@ def train_model(model, criterion, optimizer, scheduler, dataloaders, dataset_siz
             running_corrects = 0
 
             for inputs, labels in dataloaders[phase]:
-                inputs = inputs.to(device)
-                labels = labels.to(device)
+                inputs = inputs.to(device_)
+                labels = labels.to(device_)
 
                 optimizer.zero_grad()
 
@@ -171,19 +206,27 @@ def save_model(model, optimizer, image_datasets, lr_scheduler, criterion, path, 
 
 if __name__ == '__main__':
 
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
-
-    print(device)
-
     args = parser.parse_args()
-    print(args.accumulate(args.integers))
 
-    dataloaders, dataset_sizes = load_and_process_data()
-    print(dataloaders['train'])
+    name = args.name
+    lr = args.lr
+    layers = args.layers
+    hidden_units = args.units
+    epochs = args.epochs
 
-    nn, loss, opt, lr_scheduler = instantiate_model(device)
-    m = train_model(nn, loss, opt, lr_scheduler, dataloaders, dataset_sizes, device=device, num_epochs=2)
+    dls, ds_sizes = load_and_process_data()
 
-    path = os.path.join(os.path.dirname(__file__), 'resnet')
-    save_model(m, opt, dataloaders, lr_scheduler, loss, path, 'resnet', 2)
+    if args.device == 'cuda':
+        if not torch.cuda.is_available():
+            device = 'cpu'
+            print('Cuda is not available in this machine, setting device to cpu')
+        else:
+            device = args.device
+    else:
+        device = args.device
 
+    nn, loss, opt, lr_scheduler = instantiate_model(name, layers, hidden_units, lr, 0.2, 'cpu')
+    m = train_model(nn, loss, opt, lr_scheduler, dls, ds_sizes, device_=device, num_epochs=epochs)
+
+    #path = os.path.join(os.path.dirname(__file__), name)
+    #save_model(m, opt, dataloaders, lr_scheduler, loss, path, 'resnet', 2)
