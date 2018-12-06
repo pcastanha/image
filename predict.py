@@ -20,7 +20,9 @@ logger = logging.getLogger(__file__)
 parser = ArgumentParser(description='Process solution arguments.')
 parser.add_argument('--device', type=str, default='cpu', help='Device used for training (cuda or cpu)')
 parser.add_argument('--image-path', type=str, help='Path to image')
-parser.add_argument('--model-dir', type=str, help='Path to model checkpoint')
+parser.add_argument('--class-file-path', type=str, help='Path to file mapping classes to names',
+                    default='cat_to_name.json')
+parser.add_argument('--model-path', type=str, help='Path to model checkpoint')
 parser.add_argument('--k', type=int, help='Number of elements to be used by top-k', default=1)
 
 
@@ -75,10 +77,10 @@ class DeepFeedForwardNet(nn.Module):
         return out
 
 
-def load_model_checkpoint_only(model_dir_, device_='cpu'):
-    logger.info('Loading checkpoint located at: {}'.format(model_dir))
+def load_model_checkpoint_only(model_path_, device_='cpu'):
+    logger.info('Loading checkpoint located at: {}'.format(model_path_))
 
-    parameters = model_dir_.split('/')
+    parameters = model_path_.split('/')
 
     if len(parameters) == 0:
         raise ValueError('Wrong model dir format')
@@ -90,7 +92,7 @@ def load_model_checkpoint_only(model_dir_, device_='cpu'):
     hidden_units = int(parameters[2].split('_')[0])
 
     # checkpoint = torch.load(model_dir_)
-    checkpoint = torch.load(model_dir_, map_location=lambda storage, loc: storage)
+    checkpoint = torch.load(model_path_, map_location=lambda storage, loc: storage)
     model_checkpoint = checkpoint['model']
     net = models.__dict__[name](pretrained=True)
 
@@ -203,7 +205,7 @@ def imshow(image, ax=None, title=None):
     return ax
 
 
-def predict(image_path_, model_, device_='cpu', topk=5):
+def predict(image_path_, model_, device_='cpu', topk=5, class_mapping_file=None):
     ''' Predict the class (or classes) of an image using a trained deep learning model.
     '''
 
@@ -217,12 +219,14 @@ def predict(image_path_, model_, device_='cpu', topk=5):
     model_ = model_.to(device_)
     image_as_tensor = image_as_tensor.to(device_)  # Switching input to same device as model.
 
+    class_labels = get_cat_to_name(class_mapping_file if class_mapping_file is not None else "cat_to_name.json")
+
     # Predict input
     predicted_ = F.softmax(model_(image_as_tensor), dim=1)
     preds = predicted_.topk(topk)
 
     probs = [float(prob) for prob in preds[0][0]]
-    classes = [reverse[int(cls)] for cls in preds[1][0]]
+    classes = [class_labels[str(reverse[int(cls)])] for cls in preds[1][0]]
 
     return probs, classes
 
@@ -267,7 +271,8 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     image_path = args.image_path
-    model_dir = args.model_dir
+    model_path = args.model_path
+    class_file = args.class_file_path
     k = args.k
 
     if args.device == 'cuda':
@@ -281,9 +286,9 @@ if __name__ == '__main__':
 
     logger.info('Device mode set to {}'.format(device))
 
-    model = load_model_checkpoint_only(model_dir, device)
-    predicted = predict(image_path, model, device_=device, topk=1)
-    logger.info(predicted)
+    model = load_model_checkpoint_only(model_path, device)
+    probs, classes = predict(image_path, model, device_=device, topk=1, class_mapping_file=class_file)
+    logger.info(list(zip(probs, classes)))
 
-    top_k = predict(image_path, model, device_=device, topk=k)
-    logger.info(top_k)
+    top_k_probs, top_k_classes = predict(image_path, model, device_=device, topk=k, class_mapping_file=class_file)
+    logger.info(list(zip(top_k_probs, top_k_classes)))
