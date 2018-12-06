@@ -42,35 +42,77 @@ def get_cat_to_name(path='cat_to_name.json'):
 
 
 class DeepFeedForwardNet(nn.Module):
-    def __init__(self, dropout=0.2):
+    def __init__(self, input_shape, layers=2, units=128, dropout=0.5):
         super(DeepFeedForwardNet, self).__init__()
-        self.hid1 = nn.Linear(512, 1024)
-        self.hid2 = nn.Linear(1024, 256)
-        self.out = nn.Linear(256, 102)
-        self.dropout = nn.Dropout(dropout)
+        self.input_shape = input_shape
+        self.input = nn.Linear(input_shape, units)
+        self.out = nn.Linear(units, 102)
+        if dropout is not None:
+            self.dropout = nn.Dropout(dropout)
+        else:
+            self.dropout = dropout
+
+        self.layers = list()
+        for i in range(layers):
+            self.layers.append(nn.Linear(units, units))
+
+        self.layers = nn.ModuleList(self.layers)
 
     def forward(self, x):
-        x = F.relu(self.dropout(self.hid1(x)))
-        x = F.relu(self.hid2(x))
-        out = self.out(x)
+        if self.dropout is not None:
+            y = F.relu(self.dropout(self.input(x)))
+
+            for layer in self.layers:
+                y = F.relu(self.dropout(layer(y)))
+        else:
+            y = F.relu(self.input(x))
+
+            for layer in self.layers:
+                y = F.relu(layer(y))
+
+        out = self.out(y)
 
         return out
 
 
 def load_model_checkpoint_only(model_dir_, device_='cpu'):
     logger.info('Loading checkpoint located at: {}'.format(model_dir))
-    checkpoint = torch.load(model_dir_)
-    model_checkpoint = checkpoint['model']
 
-    net = models.resnet18(pretrained=True)
-    dff_net = DeepFeedForwardNet()
+    parameters = model_dir_.split('/')
+
+    if len(parameters) == 0:
+        raise ValueError('Wrong model dir format')
+
+    parameters = parameters[-1].split('-')
+
+    name = parameters[0]  # Pretrained model name.
+    layers = int(parameters[1].replace('dnn', ''))  # Number of layers in the checkpoint name.
+    hidden_units = int(parameters[2].split('_')[0])
+
+    # checkpoint = torch.load(model_dir_)
+    checkpoint = torch.load(model_dir_, map_location=lambda storage, loc: storage)
+    model_checkpoint = checkpoint['model']
+    net = models.__dict__[name](pretrained=True)
+
+    if 'vgg' in name:
+        input_features = 25088  # VGG input
+    elif 'resnet' in name:
+        input_features = 512  # Resnet input
+    else:
+        input_features = 9216  # Alexnet input
+
+    dff_net = DeepFeedForwardNet(input_features, layers, hidden_units)
+    # dff_net = dff_net.to(device_)
 
     for p in net.parameters():
         p.requires_grad = False
 
-    net.fc = dff_net
-    net = net.to(device_)
+    if 'resnet' in name:
+        net.fc = dff_net
+    else:
+        net.classifier = dff_net
 
+    net = net.to(device_)
     net.load_state_dict(model_checkpoint)
     net.class_to_index = checkpoint['classes']
 
@@ -161,21 +203,23 @@ def imshow(image, ax=None, title=None):
     return ax
 
 
-def predict(image_path, model, topk=5):
+def predict(image_path_, model_, device_='cpu', topk=5):
     ''' Predict the class (or classes) of an image using a trained deep learning model.
     '''
 
     logger.info("Starting prediction mode with top-{}".format(topk))
 
-    image_as_tensor = torch.Tensor(process_image(Image.open(image_path))).reshape([1, 3, 224, 224])
-    reverse = {k: v for v, k in model.class_to_index.items()}
+    image_as_tensor = torch.Tensor(process_image(Image.open(image_path_))).reshape([1, 3, 224, 224])
+    reverse = {k: v for v, k in model_.class_to_index.items()}
 
     # Switch the model to eval mode
-    model.eval()
+    model_.eval()
+    model_ = model_.to(device_)
+    image_as_tensor = image_as_tensor.to(device_)  # Switching input to same device as model.
 
     # Predict input
-    predicted = F.softmax(model(image_as_tensor), dim=1)
-    preds = predicted.topk(topk)
+    predicted_ = F.softmax(model_(image_as_tensor), dim=1)
+    preds = predicted_.topk(topk)
 
     probs = [float(prob) for prob in preds[0][0]]
     classes = [reverse[int(cls)] for cls in preds[1][0]]
@@ -238,8 +282,8 @@ if __name__ == '__main__':
     logger.info('Device mode set to {}'.format(device))
 
     model = load_model_checkpoint_only(model_dir, device)
-    predicted = predict(image_path, model, topk=1)
+    predicted = predict(image_path, model, device_=device, topk=1)
     logger.info(predicted)
 
-    top_k = predict(image_path, model, k)
+    top_k = predict(image_path, model, device_=device, topk=k)
     logger.info(top_k)

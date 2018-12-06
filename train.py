@@ -197,7 +197,7 @@ def train_model(model, criterion, optimizer, scheduler, dataloaders, dataset_siz
     return model
 
 
-def save_model(model, optimizer, image_datasets, lr_scheduler_, criterion, layers_, name_, epochs_, path_):
+def save_model(model, optimizer, image_datasets, lr_scheduler_, criterion, layers_, hidden_units_, name_, epochs_, path_):
     directory = os.path.join(path_, '{}-dnn{}'.format(name_, layers_))
     if not os.path.exists(directory):
         os.makedirs(directory)
@@ -211,7 +211,7 @@ def save_model(model, optimizer, image_datasets, lr_scheduler_, criterion, layer
         'classes': image_datasets['train'].dataset.class_to_idx,
         'lr_scheduler': lr_scheduler_.state_dict(),
         'criterion': criterion.state_dict()
-    }, os.path.join(directory, '{}-dnn{}_{}_{}.tar'.format(name_, layers_, epochs_, 'checkpoint')))
+    }, os.path.join(directory, '{}-dnn{}-{}_{}_{}.tar'.format(name_, layers_, hidden_units_, epochs_, 'checkpoint')))
 
 
 if __name__ == '__main__':
@@ -241,6 +241,6 @@ if __name__ == '__main__':
     m = train_model(nn, loss, opt, lr_scheduler, dls, ds_sizes, device_=device, num_epochs=epochs)
 
     path = os.path.join(os.path.dirname(__file__), 'checkpoints')
-    save_model(m, opt, dls, lr_scheduler, loss, layers, name, epochs, path)
+    save_model(m, opt, dls, lr_scheduler, loss, layers, hidden_units, name, epochs, path)
 
     logger.info("Model trained and saved")
